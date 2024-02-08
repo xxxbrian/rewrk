@@ -17,6 +17,9 @@ pub struct BenchmarkSettings {
     /// The number of worker threads given to Tokio's runtime.
     pub threads: usize,
 
+    /// The network interface or address to bind to.
+    pub interface: Option<String>,
+
     /// The amount of concurrent connections when connecting to the
     /// framework.
     pub connections: usize,
@@ -88,6 +91,7 @@ async fn run(settings: BenchmarkSettings) -> Result<()> {
     let handles = http::start_tasks(
         settings.duration,
         settings.connections,
+        settings.interface,
         settings.host.trim().to_string(),
         settings.bench_type,
         settings.method,

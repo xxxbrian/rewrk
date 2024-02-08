@@ -28,6 +28,7 @@ impl Scheme {
 
 #[derive(Clone)]
 pub(crate) struct UserInput {
+    pub(crate) local_socket_addr: Option<SocketAddr>,
     pub(crate) addr: SocketAddr,
     pub(crate) scheme: Scheme,
     pub(crate) host: String,
@@ -40,6 +41,7 @@ pub(crate) struct UserInput {
 
 impl UserInput {
     pub(crate) async fn new(
+        interface: Option<String>,
         protocol: BenchType,
         string: String,
         method: Method,
@@ -47,13 +49,14 @@ impl UserInput {
         body: Bytes,
     ) -> Result<Self> {
         spawn_blocking(move || {
-            Self::blocking_new(protocol, string, method, headers, body)
+            Self::blocking_new(interface, protocol, string, method, headers, body)
         })
         .await
         .unwrap()
     }
 
     fn blocking_new(
+        interface: Option<String>,
         protocol: BenchType,
         string: String,
         method: Method,
@@ -93,18 +96,34 @@ impl UserInput {
             .unwrap_or_else(|| scheme.default_port());
         let host_header = HeaderValue::from_str(&host)?;
 
-        // Prefer ipv4.
+        // Bind to any local address.
+        let (local_socket_addr, need_ipv4) = match interface {
+            Some(interface) => {
+                // TODO: Support interface name input.
+                let addr = interface.parse()?;
+                (Some(SocketAddr::new(addr, 0)), addr.is_ipv4())
+            },
+            None => (None, true), //default to ipv4
+        };
+
+        // Resolve the hostname to an IP address.
+        // Chose by interface ip type.
         let addr_iter = (host.as_str(), port).to_socket_addrs()?;
         let mut last_addr = None;
         for addr in addr_iter {
-            last_addr = Some(addr);
-            if addr.is_ipv4() {
+            if addr.is_ipv4() && need_ipv4 {
+                last_addr = Some(addr);
+                break;
+            }
+            if addr.is_ipv6() && !need_ipv4 {
+                last_addr = Some(addr);
                 break;
             }
         }
-        let addr = last_addr.ok_or_else(|| anyhow!("hostname lookup failed"))?;
+        let addr = last_addr.ok_or_else(|| anyhow!("DNS lookup failed"))?;
 
         Ok(Self {
+            local_socket_addr,
             addr,
             scheme,
             host,

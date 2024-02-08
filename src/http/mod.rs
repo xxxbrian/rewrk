@@ -11,7 +11,7 @@ use hyper::body::Bytes;
 use hyper::client::conn::{self, SendRequest};
 use hyper::Body;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
+use tokio::net::{TcpSocket, TcpStream};
 use tokio::task::JoinHandle;
 use tokio::time::error::Elapsed;
 use tokio::time::{sleep, timeout_at, Instant};
@@ -50,6 +50,7 @@ impl BenchType {
 pub async fn start_tasks(
     time_for: Duration,
     connections: usize,
+    interface: Option<String>,
     uri_string: String,
     bench_type: BenchType,
     method: Method,
@@ -59,7 +60,7 @@ pub async fn start_tasks(
 ) -> anyhow::Result<FuturesUnordered<Handle>> {
     let deadline = Instant::now() + time_for;
     let user_input =
-        UserInput::new(bench_type, uri_string, method, headers, body).await?;
+        UserInput::new(interface, bench_type, uri_string, method, headers, body).await?;
 
     let handles = FuturesUnordered::new();
 
@@ -82,6 +83,7 @@ async fn benchmark(
     let connector = RewrkConnector::new(
         deadline,
         bench_type,
+        user_input.local_socket_addr,
         user_input.addr,
         user_input.scheme,
         user_input.host,
@@ -181,6 +183,7 @@ async fn benchmark(
 struct RewrkConnector {
     deadline: Instant,
     bench_type: BenchType,
+    interface_addr: Option<SocketAddr>,
     addr: SocketAddr,
     scheme: Scheme,
     host: String,
@@ -191,6 +194,7 @@ impl RewrkConnector {
     fn new(
         deadline: Instant,
         bench_type: BenchType,
+        interface_addr: Option<SocketAddr>,
         addr: SocketAddr,
         scheme: Scheme,
         host: String,
@@ -200,6 +204,7 @@ impl RewrkConnector {
         Self {
             deadline,
             bench_type,
+            interface_addr,
             addr,
             scheme,
             host,
@@ -232,7 +237,22 @@ impl RewrkConnector {
             conn_builder.http2_only(true);
         }
 
-        let stream = TcpStream::connect(self.addr).await?;
+        // let stream = TcpStream::connect(self.addr).await?;
+        // let socket = TcpSocket::new_v4()?;
+        // socket.bind(self.interface_addr)?;
+        // let stream = socket.connect(self.addr).await?;
+        let stream = match self.interface_addr {
+            Some(interface_addr) => {
+                // let socket = TcpSocket::new_v4()?;
+                let socket = match interface_addr {
+                    SocketAddr::V4(_) => TcpSocket::new_v4()?,
+                    SocketAddr::V6(_) => TcpSocket::new_v6()?,
+                };
+                socket.bind(interface_addr)?;
+                socket.connect(self.addr).await?
+            },
+            None => TcpStream::connect(self.addr).await?,
+        };
         let stream = self.usage.wrap_stream(stream);
 
         let send_request = match self.scheme {

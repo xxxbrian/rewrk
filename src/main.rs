@@ -109,8 +109,11 @@ fn main() {
     let body: &str = args.value_of("body").unwrap_or_default();
     let body = Bytes::copy_from_slice(body.as_bytes());
 
+    let interface: Option<String> = args.value_of("interface").map(|s| s.to_string());
+
     let settings = bench::BenchmarkSettings {
         threads,
+        interface,
         connections: conns,
         host: host.to_string(),
         bench_type,
@@ -202,6 +205,13 @@ fn parse_args() -> ArgMatches<'static> {
                 .help("Set the amount of concurrent e.g. '-c 512'")
                 .takes_value(true)
                 .default_value("1"),
+        )
+        .arg(
+            Arg::with_name("interface")
+                .short("i")
+                .long("interface")
+                .help("Set the interface or IP to bind to e.g. '-i eth0'")
+                .takes_value(true)
         )
         .arg(
             Arg::with_name("host")
